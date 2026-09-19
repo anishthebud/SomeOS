@@ -22,7 +22,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
-  PanelRightOpen,
   Plus,
   RefreshCw,
   Save,
@@ -223,10 +222,10 @@ export function SomeOSApp() {
       <section className="os-main">
         <header className="topbar">
           <button className="icon-button mobile-only" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20} /></button>
-          <button className={`icon-button desktop-only ${sidebarOpen ? "is-active" : ""}`} onClick={toggleSidebar} aria-label={sidebarOpen ? "Close left pane" : "Open left pane"} aria-controls="someos-navigation" aria-pressed={sidebarOpen} title={sidebarOpen ? "Close left pane" : "Open left pane"}>{sidebarOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}</button>
+          <button className={`pane-toggle desktop-only ${sidebarOpen ? "is-active" : ""}`} onClick={toggleSidebar} aria-label={sidebarOpen ? "Hide navigation sidebar" : "Show navigation sidebar"} aria-controls="someos-navigation" aria-expanded={sidebarOpen} title={sidebarOpen ? "Hide navigation sidebar" : "Show navigation sidebar"}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}<span>{sidebarOpen ? "Hide sidebar" : "Show sidebar"}</span></button>
           <form className="global-search" onSubmit={runSearch}><Search size={17} /><input ref={searchRef} value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search your private filesystem" aria-label="Search files" /><kbd>⌘ K</kbd></form>
           <button className="icon-button" onClick={() => void refresh()} title="Refresh filesystem" aria-label="Refresh filesystem"><RefreshCw className={busy === "refresh" ? "spin" : ""} size={18} /></button>
-          <button className={`icon-button ${assistantOpen ? "is-active" : ""}`} onClick={toggleAssistant} title={assistantOpen ? "Close assistant pane" : "Open assistant pane"} aria-label={assistantOpen ? "Close assistant pane" : "Open assistant pane"} aria-controls="someos-assistant" aria-pressed={assistantOpen}>{assistantOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}</button>
+          <button className={`pane-toggle assistant-toggle ${assistantOpen ? "is-active" : ""}`} onClick={toggleAssistant} title={assistantOpen ? "Hide SomeOS Assistant" : "Ask SomeOS"} aria-label={assistantOpen ? "Hide SomeOS Assistant" : "Open SomeOS Assistant"} aria-controls="someos-assistant" aria-expanded={assistantOpen}>{assistantOpen ? <PanelRightClose size={18} /> : <Sparkles size={18} />}<span>{assistantOpen ? "Hide assistant" : "Ask SomeOS"}</span></button>
         </header>
 
         {searchOpen && <div className="search-popover"><div className="search-popover-head"><span>{query ? `Results for “${query}”` : "Search SomeOS"}</span><button className="icon-button" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={17} /></button></div>{busy === "search" ? <div className="search-empty"><LoaderCircle className="spin" size={18} /> Searching files</div> : hits.length ? hits.map((hit) => <button className="search-hit" key={hit.path} onClick={() => openPath(hit.path)}><FileText size={18} /><span><strong>{hit.title}</strong><small>{hit.path}</small><p>{hit.excerpt}</p></span></button>) : <div className="search-empty">{query ? "No matching files." : "Type a query and press Enter."}</div>}</div>}
@@ -243,7 +242,7 @@ export function SomeOSApp() {
       </section>
 
       {assistantOpen && <button className="assistant-scrim" aria-label="Close assistant" onClick={toggleAssistant} />}
-      {assistantOpen && <Assistant onOpen={openPath} showNotice={showNotice} onClose={toggleAssistant} />}
+      <Assistant onOpen={openPath} showNotice={showNotice} onClose={toggleAssistant} />
       {notice && <div className={`toast ${notice.tone || ""}`} role="status">{notice.tone === "good" ? <Check size={17} /> : notice.tone === "bad" ? <Circle size={17} /> : null}{notice.text}</div>}
     </div>
   );
