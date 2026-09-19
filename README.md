@@ -448,3 +448,55 @@ hackmit2026/
 └── docs/
     └── architecture.md
 ```
+
+---
+
+## Local Gemma 4 12B server
+
+The ASUS Ascent GX10 serves Google's official W4A16 deployment checkpoint,
+`google/gemma-4-12B-it-qat-w4a16-ct`, through vLLM's OpenAI-compatible API.
+It is the same 12B model with 4-bit weights and BF16 activations, reducing
+download size and memory use while retaining fast GPU execution. vLLM is
+pinned as a Git submodule in `third_party/vllm`; Python dependencies live in
+the repo-local `.venv`. Set `MODEL_ID=google/gemma-4-12B-it` in `.env` to use
+the 23.9 GB BF16 checkpoint instead.
+
+### Install
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3.12-dev
+git submodule update --init --recursive
+cp .env.example .env
+./scripts/setup_vllm.sh
+```
+
+The setup script installs the CUDA 13 ARM64 build required by the NVIDIA
+GB10. Re-run it after updating the vLLM submodule.
+
+### Start and test
+
+```bash
+./scripts/start_gemma4.sh
+tail -f .run/gemma4.log
+```
+
+The first start downloads the model to `~/.cache/huggingface`. When the log
+says the application is ready, run:
+
+```bash
+./scripts/smoke_test.sh
+```
+
+The API is available at `http://<gx10-ip>:8000/v1`. Stop it with:
+
+```bash
+./scripts/stop_gemma4.sh
+```
+
+The default 8K context and 50% memory limit leave headroom for speech,
+retrieval, and other local services while still supporting many concurrent
+requests. These defaults favor reliable voice-assistant
+latency. Adjust `MAX_MODEL_LEN` and `GPU_MEMORY_UTILIZATION` in `.env` if
+needed. The default listener binds to all interfaces without authentication;
+set `VLLM_API_KEY` in `.env` before using an untrusted network.

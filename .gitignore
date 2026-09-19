@@ -1,0 +1,15 @@
+.venv/
+.env
+.run/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# SomeOS filesystem vault is live machine data, not source code.
+/sources/
+/wiki/
+
+# Local secrets and generated OS metadata.
+web/.env.local
+.DS_Store
+._*

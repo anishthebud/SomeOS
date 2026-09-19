@@ -1,0 +1,16 @@
+[Unit]
+Description=SomeOS private knowledge system
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/asus/hackmit2026/web
+Environment=NODE_ENV=production
+EnvironmentFile=/home/asus/hackmit2026/web/.env.local
+ExecStart=/home/asus/.local/opt/node-v22.20.0-linux-arm64/bin/node /home/asus/hackmit2026/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
