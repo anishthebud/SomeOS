@@ -30,8 +30,10 @@ button, a, input, textarea, select { outline: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--teal); }
 button:disabled { opacity: .48; cursor: not-allowed; }
 
-.someos-shell { min-height: 100dvh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); background: var(--surface-0); overflow: hidden; }
-.someos-shell.with-assistant { grid-template-columns: var(--sidebar) minmax(0, 1fr) var(--assistant); }
+.someos-shell { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); background: var(--surface-0); overflow: hidden; }
+.someos-shell.with-sidebar { grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+.someos-shell.with-assistant { grid-template-columns: minmax(0, 1fr) var(--assistant); }
+.someos-shell.with-sidebar.with-assistant { grid-template-columns: var(--sidebar) minmax(0, 1fr) var(--assistant); }
 
 .os-sidebar { height: 100dvh; min-width: 0; display: flex; flex-direction: column; background: #101412; border-right: 1px solid var(--line); padding: 14px 10px 12px; overflow: hidden; z-index: 30; }
 .brand-row { min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 4px 7px 12px; }
@@ -39,6 +41,8 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .brand-row > div:nth-child(2) { min-width: 0; display: flex; flex-direction: column; }
 .brand-row strong { font-size: 16px; letter-spacing: -.01em; }
 .brand-row span { font-size: 11px; color: var(--subtle); white-space: nowrap; }
+.brand-row > .icon-button { margin-left: auto; }
+.os-sidebar.desktop-hidden { display: none; }
 .nav-label { margin: 15px 10px 6px; color: var(--subtle); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .nav-item, .tree-row { width: 100%; min-height: 38px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; }
 .nav-item { padding: 7px 10px; margin-bottom: 2px; }
@@ -183,6 +187,7 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .assistant-head strong { font-size: 13px; }
 .assistant-head span { color: var(--subtle); font-size: 10px; }
 .assistant-head i { width: 6px; height: 6px; display: inline-block; margin-right: 4px; border-radius: 50%; background: var(--teal); }
+.assistant-close { margin-left: auto; }
 .assistant-messages { flex: 1; min-height: 0; overflow: auto; padding: 16px 13px; }
 .message { display: flex; gap: 8px; margin-bottom: 16px; font-size: 13px; }
 .message > svg { flex: 0 0 auto; margin-top: 3px; color: var(--teal); }
@@ -217,7 +222,9 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .mobile-only { display: none; }
+.desktop-only { display: grid; }
 .mobile-scrim { display: none; }
+.assistant-scrim { display: none; }
 
 /* Finder-style filesystem workspace */
 .finder-window { height: 100%; min-height: 560px; display: flex; flex-direction: column; background: #111514; overflow: hidden; }
@@ -340,13 +347,16 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 }
 
 @media (max-width: 920px) {
-  .someos-shell, .someos-shell.with-assistant { grid-template-columns: 1fr; }
+  .someos-shell, .someos-shell.with-sidebar, .someos-shell.with-assistant, .someos-shell.with-sidebar.with-assistant { grid-template-columns: 1fr; }
   .mobile-only { display: grid; }
+  .desktop-only { display: none; }
   .os-sidebar { width: min(88vw, 310px); position: fixed; left: 0; top: 0; transform: translateX(-102%); transition: transform 180ms ease; box-shadow: 20px 0 50px rgba(0,0,0,.45); }
+  .os-sidebar.desktop-hidden { display: flex; }
   .os-sidebar.is-open { transform: translateX(0); }
   .brand-row .mobile-only { margin-left: auto; }
   .mobile-scrim { display: block; position: fixed; z-index: 25; inset: 0; border: 0; background: rgba(0,0,0,.62); }
   .assistant-pane { position: fixed; z-index: 40; right: 0; top: 0; width: min(92vw, 380px); box-shadow: -20px 0 50px rgba(0,0,0,.45); }
+  .assistant-scrim { display: block; position: fixed; z-index: 35; inset: 0; border: 0; background: rgba(0,0,0,.62); }
   .global-search kbd { display: none; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }

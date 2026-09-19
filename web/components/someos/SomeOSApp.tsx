@@ -19,6 +19,8 @@ import {
   LoaderCircle,
   Menu,
   MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -126,6 +128,7 @@ export function SomeOSApp() {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -151,6 +154,14 @@ export function SomeOSApp() {
   }, [showNotice]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    try {
+      const savedLeft = localStorage.getItem("someos:left-pane");
+      const savedRight = localStorage.getItem("someos:right-pane");
+      if (savedLeft !== null) setSidebarOpen(savedLeft === "open");
+      if (savedRight !== null) setAssistantOpen(savedRight === "open");
+    } catch { /* Storage can be unavailable in privacy mode. */ }
+  }, []);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -192,11 +203,13 @@ export function SomeOSApp() {
   const todayEvents = events.filter((event) => event.date.slice(0, 10) === today);
 
   const changeView = (next: View) => { setView(next); setMobileNav(false); if (next === "activity") void selectFile("wiki/log.md"); };
+  const toggleSidebar = () => setSidebarOpen((open) => { const next = !open; try { localStorage.setItem("someos:left-pane", next ? "open" : "closed"); } catch {} return next; });
+  const toggleAssistant = () => setAssistantOpen((open) => { const next = !open; try { localStorage.setItem("someos:right-pane", next ? "open" : "closed"); } catch {} return next; });
 
   return (
-    <div className={`someos-shell ${assistantOpen ? "with-assistant" : ""}`}>
-      <aside className={`os-sidebar ${mobileNav ? "is-open" : ""}`}>
-        <div className="brand-row"><div className="brand-glyph"><Server size={19} /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
+    <div className={`someos-shell ${sidebarOpen ? "with-sidebar" : ""} ${assistantOpen ? "with-assistant" : ""}`}>
+      <aside id="someos-navigation" className={`os-sidebar ${sidebarOpen ? "" : "desktop-hidden"} ${mobileNav ? "is-open" : ""}`}>
+        <div className="brand-row"><div className="brand-glyph"><Server size={19} /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button desktop-only" onClick={toggleSidebar} aria-label="Close left pane" title="Close left pane"><PanelLeftClose size={18} /></button><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
         <nav aria-label="Primary navigation">
           <p className="nav-label">System</p>
           {NAV.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? "is-active" : ""}`} onClick={() => changeView(id)}><Icon size={18} /><span>{label}</span>{id === "tasks" && tasks.filter((task) => task.status !== "done").length > 0 && <b>{tasks.filter((task) => task.status !== "done").length}</b>}</button>)}
@@ -210,9 +223,10 @@ export function SomeOSApp() {
       <section className="os-main">
         <header className="topbar">
           <button className="icon-button mobile-only" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20} /></button>
+          <button className={`icon-button desktop-only ${sidebarOpen ? "is-active" : ""}`} onClick={toggleSidebar} aria-label={sidebarOpen ? "Close left pane" : "Open left pane"} aria-controls="someos-navigation" aria-pressed={sidebarOpen} title={sidebarOpen ? "Close left pane" : "Open left pane"}>{sidebarOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}</button>
           <form className="global-search" onSubmit={runSearch}><Search size={17} /><input ref={searchRef} value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search your private filesystem" aria-label="Search files" /><kbd>⌘ K</kbd></form>
           <button className="icon-button" onClick={() => void refresh()} title="Refresh filesystem" aria-label="Refresh filesystem"><RefreshCw className={busy === "refresh" ? "spin" : ""} size={18} /></button>
-          <button className={`icon-button ${assistantOpen ? "is-active" : ""}`} onClick={() => setAssistantOpen((value) => !value)} title="Toggle assistant" aria-label="Toggle assistant">{assistantOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}</button>
+          <button className={`icon-button ${assistantOpen ? "is-active" : ""}`} onClick={toggleAssistant} title={assistantOpen ? "Close assistant pane" : "Open assistant pane"} aria-label={assistantOpen ? "Close assistant pane" : "Open assistant pane"} aria-controls="someos-assistant" aria-pressed={assistantOpen}>{assistantOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}</button>
         </header>
 
         {searchOpen && <div className="search-popover"><div className="search-popover-head"><span>{query ? `Results for “${query}”` : "Search SomeOS"}</span><button className="icon-button" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={17} /></button></div>{busy === "search" ? <div className="search-empty"><LoaderCircle className="spin" size={18} /> Searching files</div> : hits.length ? hits.map((hit) => <button className="search-hit" key={hit.path} onClick={() => openPath(hit.path)}><FileText size={18} /><span><strong>{hit.title}</strong><small>{hit.path}</small><p>{hit.excerpt}</p></span></button>) : <div className="search-empty">{query ? "No matching files." : "Type a query and press Enter."}</div>}</div>}
@@ -228,7 +242,8 @@ export function SomeOSApp() {
         </main>
       </section>
 
-      {assistantOpen && <Assistant onOpen={openPath} showNotice={showNotice} />}
+      {assistantOpen && <button className="assistant-scrim" aria-label="Close assistant" onClick={toggleAssistant} />}
+      {assistantOpen && <Assistant onOpen={openPath} showNotice={showNotice} onClose={toggleAssistant} />}
       {notice && <div className={`toast ${notice.tone || ""}`} role="status">{notice.tone === "good" ? <Check size={17} /> : notice.tone === "bad" ? <Circle size={17} /> : null}{notice.text}</div>}
     </div>
   );
@@ -274,8 +289,8 @@ function CalendarView({ events, refresh, showNotice }: { events: CalendarEvent[]
   return <div className="page"><SectionHeader title="Calendar" subtitle="A portable schedule stored in wiki/calendar/events.json." actions={<form className="event-add" onSubmit={add}><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Event name" aria-label="Event name" /><input type="datetime-local" value={date} onChange={(event) => setDate(event.target.value)} aria-label="Event date and time" /><button className="button primary" disabled={!title || !date}><Plus size={16} />Add</button></form>} /><div className="calendar-list">{Object.entries(grouped).length ? Object.entries(grouped).map(([day, items]) => <section key={day}><div className="calendar-day"><strong>{new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "short" })}</strong><span>{new Date(`${day}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}</span></div><div>{items.map((event) => <article className="calendar-event" key={event.id}><time>{new Date(event.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time><span><strong>{event.title}</strong><small>{event.kind || "Local event"}</small></span></article>)}</div></section>) : <EmptyState icon={CalendarDays} title="Nothing scheduled">Add your first local event above.</EmptyState>}</div></div>;
 }
 
-function Assistant({ onOpen, showNotice }: { onOpen: (path: string) => void; showNotice: (text: string, tone?: Notice["tone"]) => void }) {
+function Assistant({ onOpen, showNotice, onClose }: { onOpen: (path: string) => void; showNotice: (text: string, tone?: Notice["tone"]) => void; onClose: () => void }) {
   const [question, setQuestion] = useState(""); const [asking, setAsking] = useState(false); const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; citations?: { path: string; title: string }[] }[]>([{ role: "assistant", content: "Ask about anything in your sources or wiki. I’ll answer with local citations." }]);
   const ask = async (event: FormEvent) => { event.preventDefault(); const next = question.trim(); if (!next || asking) return; setQuestion(""); setMessages((current) => [...current, { role: "user", content: next }]); setAsking(true); try { const result = await request<{ answer: string; citations: { path: string; title: string }[] }>("/api/someos/ask", { method: "POST", body: JSON.stringify({ question: next }) }); setMessages((current) => [...current, { role: "assistant", content: result.answer, citations: result.citations }]); } catch (error) { showNotice((error as Error).message, "bad"); } finally { setAsking(false); } };
-  return <aside className="assistant-pane"><div className="assistant-head"><div className="assistant-icon"><Bot size={19} /></div><div><strong>SomeOS Assistant</strong><span><i /> Local Gemma</span></div></div><div className="assistant-messages">{messages.map((message, index) => <div className={`message ${message.role}`} key={index}>{message.role === "assistant" && <MessageSquareText size={16} />}<div><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.citations?.length ? <div className="citations">{message.citations.map((citation) => <button key={citation.path} onClick={() => onOpen(citation.path)}>{citation.path}</button>)}</div> : null}</div></div>)}{asking && <div className="message assistant"><LoaderCircle className="spin" size={16} /><div><p>Reading your filesystem…</p></div></div>}</div><form className="assistant-input" onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Ask your private knowledge…" aria-label="Ask SomeOS" rows={3} /><button disabled={!question.trim() || asking} aria-label="Send question"><Send size={17} /></button><span>Answers stay on this machine</span></form></aside>;
+  return <aside id="someos-assistant" className="assistant-pane"><div className="assistant-head"><div className="assistant-icon"><Bot size={19} /></div><div><strong>SomeOS Assistant</strong><span><i /> Local Gemma</span></div><button className="icon-button assistant-close" onClick={onClose} aria-label="Close assistant pane" title="Close assistant pane"><PanelRightClose size={18} /></button></div><div className="assistant-messages">{messages.map((message, index) => <div className={`message ${message.role}`} key={index}>{message.role === "assistant" && <MessageSquareText size={16} />}<div><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.citations?.length ? <div className="citations">{message.citations.map((citation) => <button key={citation.path} onClick={() => onOpen(citation.path)}>{citation.path}</button>)}</div> : null}</div></div>)}{asking && <div className="message assistant"><LoaderCircle className="spin" size={16} /><div><p>Reading your filesystem…</p></div></div>}</div><form className="assistant-input" onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Ask your private knowledge…" aria-label="Ask SomeOS" rows={3} /><button disabled={!question.trim() || asking} aria-label="Send question"><Send size={17} /></button><span>Answers stay on this machine</span></form></aside>;
 }
