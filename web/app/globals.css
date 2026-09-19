@@ -399,6 +399,7 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
 
 @media (max-width: 680px) {
   .topbar { height: calc(58px + env(safe-area-inset-top)); flex-basis: calc(58px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 10px 0; }
+  .topbar > .icon-button { width: 44px; height: 44px; }
   .page { padding: 24px 14px 50px; }
   .section-header { flex-direction: column; margin-bottom: 20px; }
   .section-header h1 { font-size: 29px; }
@@ -422,8 +423,8 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
   .calendar-toolbar h2 { justify-self: end; font-size: 14px; }
   .calendar-toolbar > span { display: none; }
   .calendar-nav { gap: 1px; }
-  .calendar-nav .icon-button { width: 34px; height: 34px; }
-  .calendar-today { min-height: 32px; margin-left: 1px; padding: 4px 7px; }
+  .calendar-nav .icon-button { width: 44px; height: 44px; }
+  .calendar-today { min-height: 44px; margin-left: 1px; padding: 4px 8px; }
   .calendar-layout { min-height: 0; display: block; }
   .calendar-grid { min-height: 430px; grid-template-rows: repeat(6, minmax(70px, 1fr)); }
   .calendar-cell { min-height: 70px; gap: 4px; padding: 5px; }
@@ -433,6 +434,7 @@ kbd { border: 1px solid var(--line-strong); background: var(--surface-2); color:
   .calendar-event-chip i, .calendar-more { display: none; }
   .calendar-agenda { border-top: 1px solid var(--line); border-left: 0; }
   .agenda-events { max-height: 280px; }
+  .calendar-compose input { min-height: 44px; }
   .capture-footer span { display: none; }
   .capture-footer { justify-content: flex-end; }
 }
