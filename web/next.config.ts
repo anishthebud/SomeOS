@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 // the config explicit so the vault root can be overridden via env if moved.
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // pdf-parse (pdfjs) breaks when webpack bundles it; load it from node_modules at runtime.
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"],
   // Make sure the bundled serif font is available to the icon generators.
   outputFileTracingIncludes: {
     "/icon": ["./assets/**"],

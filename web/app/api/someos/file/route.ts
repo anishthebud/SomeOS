@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { privateApiAuthorized, unauthorized } from "@/lib/apiauth";
-import { readVaultText, writeVaultText } from "@/lib/someos";
+import { readVaultPreview, writeVaultText } from "@/lib/someos";
 
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   if (!privateApiAuthorized(req)) return NextResponse.json(unauthorized(), { status: 401 });
-  try { return NextResponse.json(await readVaultText(new URL(req.url).searchParams.get("path") || ""), { headers: { "Cache-Control": "no-store" } }); }
+  try { return NextResponse.json(await readVaultPreview(new URL(req.url).searchParams.get("path") || ""), { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
 }
 export async function PUT(req: Request) {
