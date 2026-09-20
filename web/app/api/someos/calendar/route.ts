@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { privateApiAuthorized, unauthorized } from "@/lib/apiauth";
-import { createCalendarEvent, listCalendarEvents } from "@/lib/someos";
+import { createCalendarEvent, listCalendarEventsPage } from "@/lib/someos";
 
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   if (!privateApiAuthorized(req)) return NextResponse.json(unauthorized(), { status: 401 });
-  return NextResponse.json({ events: await listCalendarEvents() }, { headers: { "Cache-Control": "no-store" } });
+  const params = new URL(req.url).searchParams;
+  const on = params.get("on") || undefined;
+  const page = await listCalendarEventsPage({
+    limit: Number(params.get("limit")) || undefined,
+    offset: Number(params.get("offset")) || undefined,
+    on: on && /^\d{4}-\d{2}-\d{2}$/.test(on) ? on : undefined,
+  });
+  return NextResponse.json(page, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(req: Request) {
   if (!privateApiAuthorized(req)) return NextResponse.json(unauthorized(), { status: 401 });

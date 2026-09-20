@@ -2,7 +2,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
+import { PDFParse } from "pdf-parse";
 
+import { describeIcs, parseIcs, type IcsEvent } from "./ics";
 import { VAULT_ROOT } from "./vaultroot";
 
 export type FsNode = {
@@ -43,6 +45,46 @@ export type CalendarEvent = {
 };
 
 const TEXT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".json", ".csv", ".log", ".yaml", ".yml"]);
+const PDF_EXTENSION = ".pdf";
+const ICS_EXTENSION = ".ics";
+export const MEDIA_TYPES: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".ogv": "video/ogg",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
+  ".opus": "audio/ogg",
+  ".flac": "audio/flac",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+};
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
+// SVG is viewable but is vector text, not a raster a vision model can read.
+const INGEST_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".flac"]);
+const INGEST_EXTENSIONS = new Set([...TEXT_EXTENSIONS, PDF_EXTENSION, ICS_EXTENSION, ...INGEST_IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS]);
+const TEXT_MAX_BYTES = 1_000_000;
+const PDF_MAX_BYTES = 15_000_000;
+const PDF_VISION_MAX_PAGES = 20;
+const PDF_VISION_BATCH = 3;
+const PDF_VISION_WIDTH = 1100;
+const IMAGE_MAX_BYTES = 10_000_000;
+const MEDIA_MAX_BYTES = 50_000_000;
+// Any OpenAI-compatible /audio/transcriptions server (faster-whisper-server, vLLM Whisper, OpenAI).
+const TRANSCRIBE_BASE_URL = process.env.TRANSCRIBE_BASE_URL || "";
+const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || "whisper-1";
 const ROOT_FOLDERS = ["sources", "wiki"];
 const MODEL_URL = `${process.env.LLM_BASE_URL || "http://127.0.0.1:8000/v1"}/chat/completions`;
 const MODEL_NAME = process.env.LLM_MODEL || "gemma-4-12b-it";
@@ -161,6 +203,30 @@ export async function readVaultText(relative: string) {
   return { path: resolved.relative, content, size: stat.size, modified: stat.mtime.toISOString() };
 }
 
+export type FilePreview =
+  | { kind: "text"; path: string; content: string; size: number; modified: string }
+  | { kind: "pdf" | "video" | "audio" | "image"; path: string; content: ""; size: number; modified: string }
+  | { kind: "calendar"; path: string; content: string; events: IcsEvent[]; size: number; modified: string };
+
+export async function readVaultPreview(relative: string): Promise<FilePreview> {
+  const resolved = resolveVaultPath(relative);
+  const ext = path.extname(resolved.full).toLowerCase();
+  if (TEXT_EXTENSIONS.has(ext)) return { kind: "text", ...(await readVaultText(relative)) };
+  const stat = await fs.stat(resolved.full);
+  if (!stat.isFile()) throw new Error("Not a file");
+  const base = { path: resolved.relative, size: stat.size, modified: stat.mtime.toISOString() };
+  if (ext === ICS_EXTENSION) {
+    if (stat.size > TEXT_MAX_BYTES) throw new Error("Calendar file is too large to preview");
+    const content = await fs.readFile(resolved.full, "utf8");
+    return { kind: "calendar", ...base, content, events: parseIcs(content) };
+  }
+  if (ext === PDF_EXTENSION) return { kind: "pdf", ...base, content: "" };
+  if (VIDEO_EXTENSIONS.has(ext)) return { kind: "video", ...base, content: "" };
+  if (AUDIO_EXTENSIONS.has(ext)) return { kind: "audio", ...base, content: "" };
+  if (IMAGE_EXTENSIONS.has(ext)) return { kind: "image", ...base, content: "" };
+  throw new Error("Preview is not available for this file type");
+}
+
 export async function writeVaultText(relative: string, content: string) {
   const resolved = resolveVaultPath(relative);
   if (!TEXT_EXTENSIONS.has(path.extname(resolved.full).toLowerCase())) throw new Error("Only text files can be edited");
@@ -171,7 +237,7 @@ export async function writeVaultText(relative: string, content: string) {
   return readVaultText(resolved.relative);
 }
 
-async function collectTextFiles(relativeRoot: string): Promise<string[]> {
+async function collectTextFiles(relativeRoot: string, extensions: Set<string> = TEXT_EXTENSIONS): Promise<string[]> {
   const { full } = resolveVaultPath(relativeRoot);
   const out: string[] = [];
   async function visit(dir: string, rel: string) {
@@ -181,11 +247,142 @@ async function collectTextFiles(relativeRoot: string): Promise<string[]> {
       const child = path.join(dir, entry.name);
       const childRel = `${rel}/${entry.name}`;
       if (entry.isDirectory()) await visit(child, childRel);
-      else if (TEXT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) out.push(childRel);
+      else if (extensions.has(path.extname(entry.name).toLowerCase())) out.push(childRel);
     }
   }
   await visit(full, relativeRoot);
   return out;
+}
+
+type ChatContent = string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
+
+// Text layer first (fast, exact); scanned/image-only PDFs fall back to page screenshots read by Gemma.
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const parser = new PDFParse({ data: buffer });
+  let total = 0;
+  try {
+    const result = await parser.getText();
+    total = result.total;
+    const cleaned = result.text
+      .replace(/^-- \d+ of \d+ --$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (cleaned.replace(/\s/g, "").length >= 30 * Math.max(1, total)) return cleaned;
+  } finally {
+    await parser.destroy();
+  }
+  return extractPdfViaVision(buffer, total);
+}
+
+async function extractPdfViaVision(buffer: Buffer, total: number): Promise<string> {
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const shots = await parser.getScreenshot({ first: PDF_VISION_MAX_PAGES, desiredWidth: PDF_VISION_WIDTH, imageDataUrl: true, imageBuffer: false });
+    const sections: string[] = [];
+    for (let i = 0; i < shots.pages.length; i += PDF_VISION_BATCH) {
+      const group = shots.pages.slice(i, i + PDF_VISION_BATCH);
+      const numbers = group.map((page) => page.pageNumber);
+      let text: string;
+      try {
+        text = await callGemma(
+          [
+            {
+              role: "system",
+              content:
+                "You read scanned document pages. Transcribe all text on each page faithfully, keeping headings, lists and tables (as markdown tables). Briefly describe charts, diagrams or photos in [brackets]. Start each page with a line '## Page N'. Never invent content; write [illegible] where text cannot be read.",
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: `Pages ${numbers.join(", ")} follow, in order.` },
+                ...group.map((page) => ({ type: "image_url" as const, image_url: { url: page.dataUrl } })),
+              ],
+            },
+          ],
+          3000,
+        );
+      } catch (error) {
+        throw new Error(`Scanned PDF needs a vision-capable model, but page reading failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+      sections.push(text);
+    }
+    if (!sections.length) throw new Error("PDF has no pages to read");
+    const omitted = total > PDF_VISION_MAX_PAGES ? `\n\n[Only the first ${PDF_VISION_MAX_PAGES} of ${total} pages were read.]` : "";
+    return `${sections.join("\n\n")}${omitted}`;
+  } finally {
+    await parser.destroy();
+  }
+}
+
+// Gemma reads the picture directly: visible text is transcribed and the scene described.
+async function describeImage(buffer: Buffer, ext: string): Promise<string> {
+  try {
+    return await callGemma(
+      [
+        {
+          role: "system",
+          content:
+            "You read images for a private knowledge base. First give a short description of what the image shows. Then transcribe ALL visible text exactly (keep tables as markdown tables, keep handwriting as best you can). For screenshots, charts, diagrams, receipts or whiteboards, capture the key data, labels, numbers and dates. Never invent content; write [illegible] where text cannot be read.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Read this image." },
+            { type: "image_url", image_url: { url: `data:${MEDIA_TYPES[ext]};base64,${buffer.toString("base64")}` } },
+          ],
+        },
+      ],
+      2500,
+    );
+  } catch (error) {
+    throw new Error(`Image ingestion needs a vision-capable model, but reading failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
+}
+
+async function transcribeMedia(full: string): Promise<string> {
+  if (!TRANSCRIBE_BASE_URL) {
+    throw new Error("Audio/video transcription is not configured — set TRANSCRIBE_BASE_URL to an OpenAI-compatible /audio/transcriptions server");
+  }
+  const form = new FormData();
+  const ext = path.extname(full).toLowerCase();
+  form.set("file", new Blob([new Uint8Array(await fs.readFile(full))], { type: MEDIA_TYPES[ext] }), path.basename(full));
+  form.set("model", TRANSCRIBE_MODEL);
+  form.set("response_format", "json");
+  const headers: Record<string, string> = {};
+  if (process.env.TRANSCRIBE_API_KEY) headers.Authorization = `Bearer ${process.env.TRANSCRIBE_API_KEY}`;
+  const response = await fetch(`${TRANSCRIBE_BASE_URL.replace(/\/+$/, "")}/audio/transcriptions`, {
+    method: "POST",
+    headers,
+    body: form,
+    signal: AbortSignal.timeout(600_000),
+  });
+  if (!response.ok) throw new Error(`Transcription server returned ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const text = ((await response.json()) as { text?: string }).text?.trim();
+  if (!text) throw new Error("No speech detected in this recording");
+  return text;
+}
+
+// Merge parsed calendar events into wiki/calendar/events.json; stable ids make re-imports idempotent.
+async function importCalendarEvents(events: IcsEvent[]): Promise<number> {
+  const existing = await listCalendarEvents();
+  const known = new Set(existing.map((event) => event.id));
+  let added = 0;
+  for (const event of events) {
+    const id = `ics-${crypto.createHash("sha1").update(`${event.uid}|${event.start}`).digest("hex").slice(0, 12)}`;
+    if (known.has(id)) continue;
+    existing.push({
+      id,
+      title: event.title,
+      date: event.start,
+      endDate: event.end,
+      kind: "imported",
+      notes: [event.location && `Location: ${event.location}`, event.recurrence && `Repeats: ${event.recurrence}`, event.description].filter(Boolean).join("\n") || undefined,
+    });
+    known.add(id);
+    added += 1;
+  }
+  if (added) await fs.writeFile(path.join(VAULT_ROOT, "wiki/calendar/events.json"), `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  return added;
 }
 
 function excerptFor(content: string, terms: string[]): string {
@@ -229,7 +426,7 @@ export async function searchFilesystem(query: string, limit = 20): Promise<Searc
   return hits.sort((a, b) => b.score - a.score || b.modified.localeCompare(a.modified)).slice(0, limit);
 }
 
-async function callGemma(messages: { role: "system" | "user"; content: string }[], maxTokens = 1000): Promise<string> {
+async function callGemma(messages: { role: "system" | "user"; content: ChatContent }[], maxTokens = 1000): Promise<string> {
   const response = await fetch(MODEL_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,29 +479,54 @@ export async function ingestSources(limit = 8) {
     state = {};
   }
 
-  const sourceFiles = await collectTextFiles("sources");
-  const changed: { relative: string; content: string; hash: string }[] = [];
+  const sourceFiles = await collectTextFiles("sources", INGEST_EXTENSIONS);
+  // Extraction is deferred (`load`) so slow work like transcription only runs for the files in this batch.
+  const changed: { relative: string; hash: string; load: () => Promise<string>; transcript?: boolean }[] = [];
+  const errors: { source: string; error: string }[] = [];
+  const seenHashes = new Set(Object.values(state).map((entry) => entry.hash));
   for (const relative of sourceFiles) {
     const { full } = resolveVaultPath(relative);
     const stat = await fs.stat(full);
-    if (stat.size > 1_000_000) continue;
-    const content = await fs.readFile(full, "utf8");
-    const hash = crypto.createHash("sha256").update(content).digest("hex");
-    if (state[relative]?.hash !== hash) changed.push({ relative, content, hash });
+    const ext = path.extname(full).toLowerCase();
+    const isPdf = ext === PDF_EXTENSION;
+    const isMedia = VIDEO_EXTENSIONS.has(ext) || AUDIO_EXTENSIONS.has(ext);
+    const isImage = INGEST_IMAGE_EXTENSIONS.has(ext);
+    if (stat.size > (isMedia ? MEDIA_MAX_BYTES : isImage ? IMAGE_MAX_BYTES : isPdf ? PDF_MAX_BYTES : TEXT_MAX_BYTES)) continue;
+    const buffer = await fs.readFile(full);
+    const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+    // Skip anything already ingested: same path+content, or identical content living at another path (copies, renames).
+    if (state[relative]?.hash === hash || seenHashes.has(hash)) continue;
+    seenHashes.add(hash);
+    if (isImage) changed.push({ relative, hash, load: () => describeImage(buffer, ext) });
+    else if (isPdf) changed.push({ relative, hash, load: () => extractPdfText(buffer) });
+    else if (isMedia) changed.push({ relative, hash, transcript: true, load: () => transcribeMedia(full) });
+    else if (ext === ICS_EXTENSION) {
+      changed.push({
+        relative,
+        hash,
+        load: async () => {
+          const events = parseIcs(buffer.toString("utf8"));
+          if (!events.length) throw new Error("No events found in this calendar file");
+          await importCalendarEvents(events);
+          return describeIcs(events);
+        },
+      });
+    } else changed.push({ relative, hash, load: async () => buffer.toString("utf8") });
   }
 
-  const processed: { source: string; page: string; tasks: number }[] = [];
-  const errors: { source: string; error: string }[] = [];
-  for (const item of changed.slice(0, Math.max(1, Math.min(limit, 20)))) {
+  const processed: { source: string; page: string; tasks: number; summary: string }[] = [];
+  const batch = changed.slice(0, Math.max(1, Math.min(limit, 20)));
+  for (const item of batch) {
     try {
+      const content = await item.load();
       const raw = await callGemma(
         [
           {
             role: "system",
             content:
-              "Compile a private source file into one durable wiki page. Return ONLY valid JSON with keys: title (string), summary (one sentence), tags (array of 2-6 lowercase strings), body (markdown with useful headings, facts, dates, people, decisions, and open questions), tasks (array of objects with title, priority high|medium|low, due_date YYYY-MM-DD or empty). Never invent facts. Preserve important numbers and dates.",
+              "Compile a private source file into one durable wiki page. Return ONLY valid JSON with keys: title (string), summary (one sentence), tags (array of 2-6 lowercase strings), body (markdown with useful headings, facts, dates, people, decisions, and open questions), tasks (array of objects with title, priority high|medium|low, due_date YYYY-MM-DD or empty; MOST sources need NO tasks, so return [] by default — only include a task when the source explicitly assigns an action item, states a deadline, or clearly requires follow-up; never turn general information, notes, reference material, or ideas into tasks). Never invent facts. Preserve important numbers and dates.",
           },
-          { role: "user", content: `SOURCE PATH: ${item.relative}\n\nSOURCE CONTENT:\n${item.content.slice(0, 90_000)}` },
+          { role: "user", content: `SOURCE PATH: ${item.relative}\n\nSOURCE CONTENT:\n${content.slice(0, 90_000)}` },
         ],
         1700,
       );
@@ -314,7 +536,8 @@ export async function ingestSources(limit = 8) {
       const tags = Array.isArray(parsed.tags) ? parsed.tags.map(String).map(slugify).filter(Boolean).slice(0, 8) : [];
       const priorPage = state[item.relative]?.page;
       const page = priorPage || `wiki/pages/${slugify(title)}-${item.hash.slice(0, 6)}.md`;
-      const body = String(parsed.body || summary).trim();
+      let body = String(parsed.body || summary).trim();
+      if (item.transcript) body += `\n\n## Transcript\n\n${content}`;
       const wikiContent = matter.stringify(`${body}\n\n## Source\n\n- [[${item.relative}]]\n`, {
         title,
         summary,
@@ -344,7 +567,7 @@ export async function ingestSources(limit = 8) {
       }
 
       state[item.relative] = { hash: item.hash, page, ingestedAt: new Date().toISOString() };
-      processed.push({ source: item.relative, page, tasks: taskCount });
+      processed.push({ source: item.relative, page, tasks: taskCount, summary: summary.replace(/\s+/g, " ").trim() });
     } catch (error) {
       errors.push({ source: item.relative, error: error instanceof Error ? error.message : "Unknown ingest error" });
     }
@@ -352,10 +575,10 @@ export async function ingestSources(limit = 8) {
 
   await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   if (processed.length) {
-    const lines = processed.map((entry) => `- ${new Date().toISOString()} — ${entry.source} → ${entry.page}`);
+    const lines = processed.map((entry) => `- ${new Date().toISOString()} — ${entry.source} → ${entry.page} — ${entry.summary}`);
     await fs.appendFile(path.join(VAULT_ROOT, "wiki/log.md"), `${lines.join("\n")}\n`, "utf8");
   }
-  return { processed, errors, remaining: Math.max(0, changed.length - processed.length - errors.length) };
+  return { processed, errors, remaining: Math.max(0, changed.length - batch.length) };
 }
 
 export async function captureSource(input: { title?: string; content: string; deviceId?: string; kind?: string }) {
@@ -458,6 +681,16 @@ export async function listCalendarEvents(): Promise<CalendarEvent[]> {
   const raw = await fs.readFile(path.join(VAULT_ROOT, "wiki/calendar/events.json"), "utf8");
   const events = JSON.parse(raw) as CalendarEvent[];
   return events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Newest first. `on` (YYYY-MM-DD) narrows to a single day; otherwise paginated by limit/offset.
+export async function listCalendarEventsPage(opts: { limit?: number; offset?: number; on?: string } = {}) {
+  const limit = Math.max(1, Math.min(opts.limit ?? 30, 200));
+  const offset = Math.max(0, opts.offset ?? 0);
+  const all = (await listCalendarEvents()).reverse();
+  const matching = opts.on ? all.filter((event) => event.date.slice(0, 10) === opts.on) : all;
+  const events = matching.slice(offset, offset + limit);
+  return { events, total: matching.length, hasMore: offset + events.length < matching.length };
 }
 
 export async function createCalendarEvent(input: Omit<CalendarEvent, "id">) {
