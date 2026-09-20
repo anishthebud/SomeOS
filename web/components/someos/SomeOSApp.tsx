@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Archive,
   Activity,
   Bot,
   CalendarDays,
@@ -51,7 +52,7 @@ type SomeTask = { id: string; title: string; status: "todo" | "in_progress" | "d
 type CalendarEvent = { id: string; title: string; date: string; endDate?: string; kind?: string; notes?: string };
 type SearchHit = { path: string; title: string; excerpt: string; score: number; modified: string };
 type IcsEvent = { uid: string; title: string; start: string; end?: string; allDay: boolean; location?: string; description?: string; recurrence?: string };
-type FileData = { kind: "text" | "pdf" | "video" | "audio" | "image" | "calendar"; path: string; content: string; size: number; modified: string; events?: IcsEvent[] };
+type FileData = { kind: "text" | "pdf" | "video" | "audio" | "image" | "calendar" | "archive" | "binary"; path: string; content: string; size: number; modified: string; events?: IcsEvent[]; entries?: string[] };
 type IngestResult = { processed: { source: string; page: string; tasks: number; summary: string }[]; errors: { source: string; error: string }[]; remaining: number };
 type Notice = { text: string; tone?: "good" | "bad" };
 
@@ -100,7 +101,12 @@ function FilePreview({ file, editing, draft, setDraft }: { file: FileData; editi
   if (file.kind === "video") return <div className="media-stage"><video className="media-video" src={src} controls preload="metadata" /></div>;
   if (file.kind === "audio") return <div className="media-stage"><audio className="media-audio" src={src} controls preload="metadata" /></div>;
   if (file.kind === "calendar") return <div className="ics-list">{file.events?.length ? file.events.map((event) => <div className="ics-event" key={`${event.uid}-${event.start}`}><strong>{event.title}</strong><span>{eventWhen(event)}{event.recurrence ? " · repeats" : ""}</span>{event.location && <span>{event.location}</span>}{event.description && <p>{event.description}</p>}</div>) : <EmptyState icon={CalendarDays} title="No events">This calendar file has no events.</EmptyState>}</div>;
-  return editing ? <textarea className="file-editor" value={draft} onChange={(event) => setDraft(event.target.value)} spellCheck="true" /> : <article className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{file.content}</ReactMarkdown></article>;
+  if (file.kind === "archive") return <div className="archive-preview"><div className="archive-heading"><Archive size={28} /><div><strong>Archive contents</strong><span>{file.entries?.length || 0} files listed</span></div></div><ul>{file.entries?.map((entry) => <li key={entry}><Archive size={14} /><code>{entry}</code></li>)}</ul></div>;
+  if (file.kind === "binary") return <div className="binary-preview"><File size={42} /><h3>Preview unavailable</h3><p>This file type is safely stored in the vault. Use Download in the toolbar to open it in its native app.</p></div>;
+  if (editing) return <textarea className="file-editor" value={draft} onChange={(event) => setDraft(event.target.value)} spellCheck="true" />;
+  const extension = `.${file.path.split(".").pop()?.toLowerCase() || ""}`;
+  const markdownFile = extension === ".md" || extension === ".mdx";
+  return markdownFile ? <article className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{file.content}</ReactMarkdown></article> : <pre className="file-code">{file.content}</pre>;
 }
 
 const NAV: { id: View; label: string; icon: typeof House }[] = [

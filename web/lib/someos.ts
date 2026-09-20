@@ -44,9 +44,12 @@ export type CalendarEvent = {
   notes?: string;
 };
 
-const TEXT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".json", ".csv", ".log", ".yaml", ".yml"]);
+const TEXT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".json", ".jsonl", ".csv", ".tsv", ".log", ".yaml", ".yml", ".html", ".htm", ".xml", ".toml", ".ini", ".conf", ".sql", ".sh", ".vcf"]);
 const PDF_EXTENSION = ".pdf";
 const ICS_EXTENSION = ".ics";
+const ARCHIVE_EXTENSIONS = new Set([".zip"]);
+const ARCHIVE_MAX_BYTES = 100_000_000;
+const execFileAsync = promisify(execFile);
 export const MEDIA_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".mp4": "video/mp4",
@@ -206,7 +209,9 @@ export async function readVaultText(relative: string) {
 export type FilePreview =
   | { kind: "text"; path: string; content: string; size: number; modified: string }
   | { kind: "pdf" | "video" | "audio" | "image"; path: string; content: ""; size: number; modified: string }
-  | { kind: "calendar"; path: string; content: string; events: IcsEvent[]; size: number; modified: string };
+  | { kind: "calendar"; path: string; content: string; events: IcsEvent[]; size: number; modified: string }
+  | { kind: "archive"; path: string; content: ""; entries: string[]; size: number; modified: string }
+  | { kind: "binary"; path: string; content: ""; size: number; modified: string };
 
 export async function readVaultPreview(relative: string): Promise<FilePreview> {
   const resolved = resolveVaultPath(relative);
@@ -224,7 +229,12 @@ export async function readVaultPreview(relative: string): Promise<FilePreview> {
   if (VIDEO_EXTENSIONS.has(ext)) return { kind: "video", ...base, content: "" };
   if (AUDIO_EXTENSIONS.has(ext)) return { kind: "audio", ...base, content: "" };
   if (IMAGE_EXTENSIONS.has(ext)) return { kind: "image", ...base, content: "" };
-  throw new Error("Preview is not available for this file type");
+  if (ARCHIVE_EXTENSIONS.has(ext)) {
+    if (stat.size > ARCHIVE_MAX_BYTES) throw new Error("Archive is too large to preview");
+    const { stdout } = await execFileAsync("unzip", ["-Z1", resolved.full], { maxBuffer: 2_000_000 });
+    return { kind: "archive", ...base, content: "", entries: stdout.split("\n").map((entry) => entry.trim()).filter(Boolean).slice(0, 500) };
+  }
+  return { kind: "binary", ...base, content: "" };
 }
 
 export async function writeVaultText(relative: string, content: string) {
@@ -700,3 +710,5 @@ export async function createCalendarEvent(input: Omit<CalendarEvent, "id">) {
   await fs.writeFile(path.join(VAULT_ROOT, "wiki/calendar/events.json"), `${JSON.stringify(events, null, 2)}\n`, "utf8");
   return event;
 }
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
