@@ -57,9 +57,40 @@ type Notice = { text: string; tone?: "good" | "bad" };
 
 function rawUrl(path: string) { return `/api/someos/files/raw?path=${encodeURIComponent(path)}`; }
 
+function SomeOSMark() {
+  return (
+    <svg className="someos-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M23.5 8.5H13.2a5.2 5.2 0 0 0 0 10.4h5.6a5.2 5.2 0 0 1 0 10.4H8.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.8" />
+      <path d="M8.5 8.5h4.1M19.4 23.5h4.1" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.8" />
+      <circle cx="8.5" cy="8.5" r="2.3" fill="currentColor" />
+      <circle cx="23.5" cy="23.5" r="2.3" fill="currentColor" />
+    </svg>
+  );
+}
+
 function eventWhen(event: IcsEvent) {
   const fmt = (value: string) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : event.allDay ? date.toLocaleDateString([], { dateStyle: "full", timeZone: "UTC" }) : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); };
   return event.end && event.end !== event.start ? `${fmt(event.start)} – ${fmt(event.end)}` : fmt(event.start);
+}
+
+type ActivityEntry = { timestamp: string; source?: string; page?: string; summary?: string };
+const ACTIVITY_PAGE_SIZE = 12;
+
+function parseActivityLog(log: string): ActivityEntry[] {
+  return log.split("\n").flatMap((line) => {
+    const match = line.match(/^\s*-\s+(\S+)\s+—\s+(.+?)\s+→\s+(.+?)\s*$/);
+    return match ? [{ timestamp: match[1], source: match[2], page: match[3], summary: "Generated wiki page from source" }] : [];
+  }).reverse();
+}
+
+function formatLogTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function Pager({ page, pageCount, onPage, label }: { page: number; pageCount: number; onPage: (page: number) => void; label: string }) {
+  if (pageCount < 2) return null;
+  return <nav className="pager" aria-label={label}><button className="icon-button" onClick={() => onPage(Math.max(0, page - 1))} disabled={page === 0} aria-label="Previous page"><ChevronLeft size={17} /></button><span>Page {page + 1} of {pageCount}</span><button className="icon-button" onClick={() => onPage(Math.min(pageCount - 1, page + 1))} disabled={page === pageCount - 1} aria-label="Next page"><ChevronRight size={17} /></button></nav>;
 }
 
 function FilePreview({ file, editing, draft, setDraft }: { file: FileData; editing: boolean; draft: string; setDraft: (value: string) => void }) {
@@ -264,7 +295,7 @@ export function SomeOSApp() {
   return (
     <div className={`someos-shell ${sidebarOpen ? "with-sidebar" : ""} ${assistantOpen ? "with-assistant" : ""}`}>
       <aside id="someos-navigation" className={`os-sidebar ${sidebarOpen ? "" : "desktop-hidden"} ${mobileNav ? "is-open" : ""}`}>
-        <div className="brand-row"><div className="brand-glyph"><Server size={19} /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button desktop-only" onClick={toggleSidebar} aria-label="Close navigation sidebar" aria-controls="someos-navigation" aria-expanded="true" title="Close navigation sidebar"><PanelLeftClose size={18} /></button><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
+        <div className="brand-row"><div className="brand-glyph"><SomeOSMark /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button desktop-only" onClick={toggleSidebar} aria-label="Close navigation sidebar" aria-controls="someos-navigation" aria-expanded="true" title="Close navigation sidebar"><PanelLeftClose size={18} /></button><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
         <nav aria-label="Primary navigation">
           <p className="nav-label">System</p>
           {NAV.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? "is-active" : ""}`} onClick={() => changeView(id)}><Icon size={18} /><span>{label}</span>{id === "tasks" && tasks.filter((task) => task.status !== "done").length > 0 && <b>{tasks.filter((task) => task.status !== "done").length}</b>}</button>)}
@@ -292,7 +323,7 @@ export function SomeOSApp() {
           {view === "files" && <FinderView folderPaths={folderPaths} openFile={openPath} onChanged={() => void refresh()} showNotice={showNotice} />}
           {(view === "sources" || view === "wiki") && <Explorer title={view === "sources" ? "Sources" : "Wiki"} subtitle={view === "sources" ? "Raw inputs from you and connected devices." : "Durable knowledge generated from your sources."} nodes={view === "sources" ? sourceTree : wikiTree} selectedPath={selectedPath} selectFile={selectFile} file={file} draft={draft} setDraft={setDraft} editing={editing} setEditing={setEditing} busy={busy} save={async () => { if (!file) return; setBusy("save"); try { const saved = await request<FileData>("/api/someos/file", { method: "PUT", body: JSON.stringify({ path: file.path, content: draft }) }); setFile(saved); setEditing(false); showNotice("File saved", "good"); void refresh(); } catch (error) { showNotice((error as Error).message, "bad"); } finally { setBusy(""); } }} ingest={view === "sources" ? runIngest : undefined} />}
           {view === "tasks" && <TasksView tasks={tasks} refresh={refresh} showNotice={showNotice} />}
-          {view === "calendar" && <CalendarView refresh={refresh} showNotice={showNotice} />}
+          {view === "calendar" && <CalendarView events={events} refresh={refresh} showNotice={showNotice} />}
           {view === "activity" && <ActivityView log={activityLog} loading={activityLoading} onOpen={openPath} reload={() => void loadActivity()} />}
         </main>
       </section>
