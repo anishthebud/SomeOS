@@ -11,6 +11,12 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+vllm_venv="${VLLM_VENV:-$repo_root/.venv}"
+if [[ ! -x "$vllm_venv/bin/vllm" ]]; then
+  echo "vLLM is missing from $vllm_venv. Run scripts/setup_vllm.sh or set VLLM_VENV to an existing vLLM environment in .env." >&2
+  exit 1
+fi
+
 model_id="${MODEL_ID:-google/gemma-4-12B-it}"
 served_name="${SERVED_MODEL_NAME:-gemma-4-12b-it}"
 host="${HOST:-0.0.0.0}"
@@ -20,7 +26,7 @@ gpu_memory_utilization="${GPU_MEMORY_UTILIZATION:-0.80}"
 dtype="${DTYPE:-bfloat16}"
 
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
-export PATH="$CUDA_HOME/bin:$repo_root/.venv/bin:$PATH"
+export PATH="$CUDA_HOME/bin:$vllm_venv/bin:$PATH"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
 args=(
@@ -38,5 +44,7 @@ if [[ -n "${VLLM_API_KEY:-}" ]]; then
   args+=(--api-key "$VLLM_API_KEY")
 fi
 
-exec "$repo_root/.venv/bin/vllm" "${args[@]}" "$@"
+# This launcher setting is not a vLLM runtime setting.
+unset VLLM_VENV
+exec "$vllm_venv/bin/vllm" "${args[@]}" "$@"
 
