@@ -21,8 +21,9 @@ import {
   Menu,
   Pencil,
   MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
-  PanelRightOpen,
   Plus,
   RefreshCw,
   Save,
@@ -100,32 +101,11 @@ function shortDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 }
 
-function formatLogTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
-}
-
-type ActivityEntry = { timestamp: string; source?: string; page?: string; summary?: string };
-
-function parseActivityLog(content: string): ActivityEntry[] {
-  // Every "- <timestamp> — <rest>" line is an entry. Sources may contain spaces; pages are slugs.
-  const entries: ActivityEntry[] = [];
-  for (const line of content.split("\n")) {
-    const row = line.match(/^-\s+(\S+)\s+—\s+(.+?)\s*$/);
-    if (!row) continue;
-    const ingest = row[2].match(/^(.+?)\s+→\s+(\S+)(?:\s+—\s+(.+))?$/);
-    entries.push(ingest ? { timestamp: row[1], source: ingest[1], page: ingest[2], summary: ingest[3]?.trim() } : { timestamp: row[1], summary: row[2] });
-  }
-  return entries.reverse();
-}
-
-const ACTIVITY_PAGE_SIZE = 15;
-
-function Pager({ page, pageCount, loading, onPage, label }: { page: number; pageCount: number; loading?: boolean; onPage: (page: number) => void; label: string }) {
-  if (pageCount <= 1) return null;
-  const shown = Array.from({ length: pageCount }, (_, index) => index).filter((index) => index === 0 || index === pageCount - 1 || Math.abs(index - page) <= 1);
-  return <nav className="pager" aria-label={label}><button className="button ghost" onClick={() => onPage(page - 1)} disabled={loading || page === 0}><ChevronLeft size={16} />Previous</button>{shown.map((index, position) => <span key={index} className="pager-item">{position > 0 && index - shown[position - 1] > 1 && <em aria-hidden="true">…</em>}<button className={`button ghost ${index === page ? "is-current" : ""}`} onClick={() => onPage(index)} disabled={loading} aria-current={index === page ? "page" : undefined}>{index + 1}</button></span>)}<button className="button ghost" onClick={() => onPage(page + 1)} disabled={loading || page >= pageCount - 1}>Next<ChevronRight size={16} /></button></nav>;
+function calendarDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function FileTree({ nodes, selected, onSelect }: { nodes: FsNode[]; selected: string; onSelect: (path: string) => void }) {
@@ -178,6 +158,7 @@ export function SomeOSApp() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [ingestResult, setIngestResult] = useState<IngestResult | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -203,6 +184,14 @@ export function SomeOSApp() {
   }, [showNotice]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    try {
+      const savedLeft = localStorage.getItem("someos:left-pane");
+      const savedRight = localStorage.getItem("someos:right-pane");
+      if (savedLeft !== null) setSidebarOpen(savedLeft === "open");
+      if (savedRight !== null) setAssistantOpen(savedRight === "open");
+    } catch { /* Storage can be unavailable in privacy mode. */ }
+  }, []);
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -268,12 +257,14 @@ export function SomeOSApp() {
   const todayTasks = tasks.filter((task) => task.status !== "done" && (!task.dueDate || task.dueDate <= today));
   const todayEvents = events;
 
-  const changeView = (next: View) => { setView(next); setMobileNav(false);  };
+  const changeView = (next: View) => { setView(next); setMobileNav(false); if (next === "activity") void selectFile("wiki/log.md"); };
+  const toggleSidebar = () => setSidebarOpen((open) => { const next = !open; try { localStorage.setItem("someos:left-pane", next ? "open" : "closed"); } catch {} return next; });
+  const toggleAssistant = () => setAssistantOpen((open) => { const next = !open; try { localStorage.setItem("someos:right-pane", next ? "open" : "closed"); } catch {} return next; });
 
   return (
-    <div className={`someos-shell ${assistantOpen ? "with-assistant" : ""}`}>
-      <aside className={`os-sidebar ${mobileNav ? "is-open" : ""}`}>
-        <div className="brand-row"><div className="brand-glyph"><Server size={19} /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
+    <div className={`someos-shell ${sidebarOpen ? "with-sidebar" : ""} ${assistantOpen ? "with-assistant" : ""}`}>
+      <aside id="someos-navigation" className={`os-sidebar ${sidebarOpen ? "" : "desktop-hidden"} ${mobileNav ? "is-open" : ""}`}>
+        <div className="brand-row"><div className="brand-glyph"><Server size={19} /></div><div><strong>SomeOS</strong><span>Private knowledge system</span></div><button className="icon-button desktop-only" onClick={toggleSidebar} aria-label="Close navigation sidebar" aria-controls="someos-navigation" aria-expanded="true" title="Close navigation sidebar"><PanelLeftClose size={18} /></button><button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={20} /></button></div>
         <nav aria-label="Primary navigation">
           <p className="nav-label">System</p>
           {NAV.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? "is-active" : ""}`} onClick={() => changeView(id)}><Icon size={18} /><span>{label}</span>{id === "tasks" && tasks.filter((task) => task.status !== "done").length > 0 && <b>{tasks.filter((task) => task.status !== "done").length}</b>}</button>)}
@@ -287,9 +278,10 @@ export function SomeOSApp() {
       <section className="os-main">
         <header className="topbar">
           <button className="icon-button mobile-only" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20} /></button>
+          {!sidebarOpen && <button className="icon-button pane-reveal desktop-only" onClick={toggleSidebar} aria-label="Show navigation sidebar" aria-controls="someos-navigation" aria-expanded="false" title="Show navigation sidebar"><PanelLeftOpen size={18} /></button>}
           <form className="global-search" onSubmit={runSearch}><Search size={17} /><input ref={searchRef} value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => setQuery(event.target.value)} placeholder="Search your private filesystem" aria-label="Search files" /><kbd>⌘ K</kbd></form>
           <button className="icon-button" onClick={() => void refresh()} title="Refresh filesystem" aria-label="Refresh filesystem"><RefreshCw className={busy === "refresh" ? "spin" : ""} size={18} /></button>
-          <button className={`icon-button ${assistantOpen ? "is-active" : ""}`} onClick={() => setAssistantOpen((value) => !value)} title="Toggle assistant" aria-label="Toggle assistant">{assistantOpen ? <PanelRightClose size={19} /> : <PanelRightOpen size={19} />}</button>
+          {!assistantOpen && <button className="icon-button pane-reveal assistant-reveal" onClick={toggleAssistant} title="Open SomeOS Assistant" aria-label="Open SomeOS Assistant" aria-controls="someos-assistant" aria-expanded="false"><Sparkles size={18} /></button>}
         </header>
 
         {searchOpen && <div className="search-popover"><div className="search-popover-head"><span>{query ? `Results for “${query}”` : "Search SomeOS"}</span><button className="icon-button" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={17} /></button></div>{busy === "search" ? <div className="search-empty"><LoaderCircle className="spin" size={18} /> Searching files</div> : hits.length ? hits.map((hit) => <button className="search-hit" key={hit.path} onClick={() => openPath(hit.path)}><FileText size={18} /><span><strong>{hit.title}</strong><small>{hit.path}</small><p>{hit.excerpt}</p></span></button>) : <div className="search-empty">{query ? "No matching files." : "Type a query and press Enter."}</div>}</div>}
@@ -305,8 +297,8 @@ export function SomeOSApp() {
         </main>
       </section>
 
-      {assistantOpen && <Assistant onOpen={openPath} showNotice={showNotice} />}
-      {ingestResult && <IngestSummary result={ingestResult} onClose={() => setIngestResult(null)} onOpen={(path) => { setIngestResult(null); openPath(path); }} />}
+      {assistantOpen && <button className="assistant-scrim" aria-label="Close assistant" onClick={toggleAssistant} />}
+      <Assistant onOpen={openPath} showNotice={showNotice} onClose={toggleAssistant} />
       {notice && <div className={`toast ${notice.tone || ""}`} role="status">{notice.tone === "good" ? <Check size={17} /> : notice.tone === "bad" ? <Circle size={17} /> : null}{notice.text}</div>}
     </div>
   );
@@ -405,40 +397,107 @@ function TasksView({ tasks, refresh, showNotice }: { tasks: SomeTask[]; refresh:
   return <div className="page"><SectionHeader title="Tasks" subtitle="Plain Markdown files, organized into a focused workflow." actions={<form className="quick-add" onSubmit={add}><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a task" aria-label="Task title" /><button className="button primary" disabled={!title.trim()}><Plus size={16} />Add</button></form>} /><div className="task-board">{columns.map((column) => <section className="task-column" key={column.id}><div className="column-title"><span>{column.label}</span><b>{tasks.filter((task) => task.status === column.id).length}</b></div>{tasks.filter((task) => task.status === column.id).map((task) => <article className="task-card" key={task.id}>{editing === task.id && draft ? <form className="task-edit" onSubmit={saveEdit}><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Title" aria-label="Title" autoFocus /><textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} placeholder="Notes" aria-label="Notes" rows={3} /><input value={draft.project} onChange={(event) => setDraft({ ...draft, project: event.target.value })} placeholder="Project" aria-label="Project" /><div className="task-edit-row"><select aria-label="Priority" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as SomeTask["priority"] })}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><input type="date" aria-label="Due date" value={draft.dueDate ?? ""} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></div><div className="task-edit-row"><button type="button" className="button" onClick={cancelEdit}>Cancel</button><button className="button primary" disabled={!draft.title.trim()}>Save</button></div></form> : <><div><span className={`priority-dot ${task.priority}`} /><small>{task.project}</small><button type="button" className="task-edit-btn" aria-label={`Edit ${task.title}`} title="Edit task" onClick={() => startEdit(task)}><Pencil size={13} /></button></div><h3>{task.title}</h3>{task.body && <p>{task.body}</p>}<footer><span>{task.dueDate ? shortDate(task.dueDate) : "No due date"}</span><select aria-label={`Status for ${task.title}`} value={task.status} onChange={(event) => void update(task, event.target.value as SomeTask["status"])}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select></footer></>}</article>)}</section>)}</div></div>;
 }
 
-const CALENDAR_PAGE_SIZE = 15;
+function CalendarView({ events, refresh, showNotice }: { events: CalendarEvent[]; refresh: () => Promise<void>; showNotice: (text: string, tone?: Notice["tone"]) => void }) {
+  const now = new Date();
+  const todayKey = calendarDateKey(now);
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState(`${todayKey}T09:00`);
+  const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const [selectedDay, setSelectedDay] = useState(todayKey);
+  const [saving, setSaving] = useState(false);
 
-function CalendarView({ refresh, showNotice }: { refresh: () => Promise<void>; showNotice: (text: string, tone?: Notice["tone"]) => void }) {
-  const [title, setTitle] = useState(""); const [date, setDate] = useState("");
-  const [items, setItems] = useState<CalendarEvent[]>([]);
-  const [page, setPage] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const generation = useRef(0);
-  const pageCount = Math.max(1, Math.ceil(total / CALENDAR_PAGE_SIZE));
+  const monthDays = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(1 - first.getDay());
+    return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+  }, [cursor]);
+  const eventsByDay = useMemo(() => {
+    const grouped = new Map<string, CalendarEvent[]>();
+    for (const item of events) {
+      const key = item.date.slice(0, 10);
+      const items = grouped.get(key) || [];
+      items.push(item);
+      grouped.set(key, items);
+    }
+    grouped.forEach((items) => items.sort((a, b) => a.date.localeCompare(b.date)));
+    return grouped;
+  }, [events]);
+  const selectedEvents = eventsByDay.get(selectedDay) || [];
+  const selectedDate = new Date(`${selectedDay}T12:00:00`);
 
-  // Newest-first; only the requested page is fetched from the server.
-  const load = useCallback(async (target: number) => {
-    const mine = ++generation.current;
-    setLoading(true);
+  const pickDay = (day: Date) => {
+    const key = calendarDateKey(day);
+    setSelectedDay(key);
+    setDate(`${key}T09:00`);
+    if (day.getMonth() !== cursor.getMonth() || day.getFullYear() !== cursor.getFullYear()) {
+      setCursor(new Date(day.getFullYear(), day.getMonth(), 1));
+    }
+  };
+  const goToday = () => {
+    const current = new Date();
+    const key = calendarDateKey(current);
+    setCursor(new Date(current.getFullYear(), current.getMonth(), 1));
+    setSelectedDay(key);
+    setDate(`${key}T09:00`);
+  };
+  const add = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || !date) return;
+    setSaving(true);
     try {
-      const result = await request<{ events: CalendarEvent[]; total: number }>(`/api/someos/calendar?limit=${CALENDAR_PAGE_SIZE}&offset=${target * CALENDAR_PAGE_SIZE}`);
-      if (mine !== generation.current) return;
-      const lastPage = Math.max(0, Math.ceil(result.total / CALENDAR_PAGE_SIZE) - 1);
-      if (target > lastPage) return void load(lastPage); // page vanished (e.g. events removed)
-      setItems(result.events); setTotal(result.total); setPage(target);
-    } catch (error) { if (mine === generation.current) showNotice((error as Error).message, "bad"); }
-    finally { if (mine === generation.current) setLoading(false); }
-  }, [showNotice]);
+      await request("/api/someos/calendar", { method: "POST", body: JSON.stringify({ title: title.trim(), date }) });
+      setSelectedDay(date.slice(0, 10));
+      setTitle("");
+      await refresh();
+      showNotice("Event added to your local calendar", "good");
+    } catch (error) { showNotice((error as Error).message, "bad"); }
+    finally { setSaving(false); }
+  };
 
-  useEffect(() => { void load(0); }, [load]);
-
-  const add = async (event: FormEvent) => { event.preventDefault(); try { await request("/api/someos/calendar", { method: "POST", body: JSON.stringify({ title, date }) }); setTitle(""); setDate(""); await Promise.all([load(0), refresh()]); } catch (error) { showNotice((error as Error).message, "bad"); } };
-  const grouped = items.reduce<Record<string, CalendarEvent[]>>((result, item) => { const day = item.date.slice(0, 10); (result[day] ||= []).push(item); return result; }, {});
-  return <div className="page"><SectionHeader title="Calendar" subtitle="A portable schedule stored in wiki/calendar/events.json." actions={<form className="event-add" onSubmit={add}><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Event name" aria-label="Event name" /><input type="datetime-local" value={date} onChange={(event) => setDate(event.target.value)} aria-label="Event date and time" /><button className="button primary" disabled={!title || !date}><Plus size={16} />Add</button></form>} /><div className="calendar-list">{Object.entries(grouped).length ? Object.entries(grouped).map(([day, dayItems]) => <section key={day}><div className="calendar-day"><strong>{new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "short" })}</strong><span>{new Date(`${day}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}</span></div><div>{dayItems.map((event) => <article className="calendar-event" key={event.id}><time>{new Date(event.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time><span><strong>{event.title}</strong><small>{event.kind || "Local event"}</small></span></article>)}</div></section>) : loading ? null : <EmptyState icon={CalendarDays} title="Nothing scheduled">Add your first local event above.</EmptyState>}</div>{loading && !items.length && <div className="file-loading"><LoaderCircle className="spin" size={20} /> Loading events</div>}<Pager page={page} pageCount={pageCount} loading={loading} onPage={(target) => void load(target)} label="Calendar pages" /></div>;
+  return <div className="page calendar-page">
+    <SectionHeader title="Calendar" subtitle="Your private schedule, stored locally in wiki/calendar/events.json." />
+    <div className="calendar-window">
+      <div className="calendar-toolbar">
+        <div className="calendar-nav">
+          <button className="icon-button" onClick={() => setCursor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} aria-label="Previous month" title="Previous month"><ChevronLeft size={18} /></button>
+          <button className="icon-button" onClick={() => setCursor((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} aria-label="Next month" title="Next month"><ChevronRight size={18} /></button>
+          <button className="button ghost calendar-today" onClick={goToday}>Today</button>
+        </div>
+        <h2 aria-live="polite">{cursor.toLocaleDateString([], { month: "long", year: "numeric" })}</h2>
+        <span>{events.length} event{events.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="calendar-layout">
+        <section className="month-calendar" aria-label={`${cursor.toLocaleDateString([], { month: "long", year: "numeric" })} calendar`}>
+          <div className="calendar-weekdays" aria-hidden="true">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div>
+          <div className="calendar-grid">
+            {monthDays.map((day) => {
+              const key = calendarDateKey(day);
+              const dayEvents = eventsByDay.get(key) || [];
+              const outside = day.getMonth() !== cursor.getMonth();
+              return <button key={key} className={`calendar-cell ${outside ? "is-outside" : ""} ${key === todayKey ? "is-today" : ""} ${key === selectedDay ? "is-selected" : ""}`} onClick={() => pickDay(day)} aria-label={`${day.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}` : ""}`} aria-pressed={key === selectedDay}>
+                <span className="calendar-date-number">{day.getDate()}</span>
+                <span className="calendar-cell-events">{dayEvents.slice(0, 3).map((item) => <span className="calendar-event-chip" key={item.id}><i />{item.title}</span>)}{dayEvents.length > 3 && <span className="calendar-more">+{dayEvents.length - 3} more</span>}</span>
+              </button>;
+            })}
+          </div>
+        </section>
+        <aside className="calendar-agenda" aria-label="Selected day agenda">
+          <div className="agenda-heading"><span>{selectedDate.toLocaleDateString([], { weekday: "long" })}</span><strong>{selectedDate.toLocaleDateString([], { month: "long", day: "numeric" })}</strong><small>{selectedEvents.length ? `${selectedEvents.length} scheduled` : "No events yet"}</small></div>
+          <div className="agenda-events">{selectedEvents.length ? selectedEvents.map((item) => <article key={item.id}><time>{new Date(item.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time><div><strong>{item.title}</strong><span>{item.kind || "Local event"}</span>{item.notes && <p>{item.notes}</p>}</div></article>) : <div className="agenda-empty"><CalendarDays size={24} /><span>Nothing scheduled for this day.</span></div>}</div>
+          <form className="calendar-compose" onSubmit={add}>
+            <label><span>New event</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Event name" aria-label="Event name" /></label>
+            <label><span>Date and time</span><input type="datetime-local" value={date} onChange={(event) => setDate(event.target.value)} aria-label="Event date and time" /></label>
+            <button className="button primary" disabled={!title.trim() || !date || saving}>{saving ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}Add event</button>
+          </form>
+        </aside>
+      </div>
+    </div>
+  </div>;
 }
 
-function Assistant({ onOpen, showNotice }: { onOpen: (path: string) => void; showNotice: (text: string, tone?: Notice["tone"]) => void }) {
+function Assistant({ onOpen, showNotice, onClose }: { onOpen: (path: string) => void; showNotice: (text: string, tone?: Notice["tone"]) => void; onClose: () => void }) {
   const [question, setQuestion] = useState(""); const [asking, setAsking] = useState(false); const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; citations?: { path: string; title: string }[] }[]>([{ role: "assistant", content: "Ask about anything in your sources or wiki. I’ll answer with local citations." }]);
   const ask = async (event: FormEvent) => { event.preventDefault(); const next = question.trim(); if (!next || asking) return; setQuestion(""); setMessages((current) => [...current, { role: "user", content: next }]); setAsking(true); try { const result = await request<{ answer: string; citations: { path: string; title: string }[] }>("/api/someos/ask", { method: "POST", body: JSON.stringify({ question: next }) }); setMessages((current) => [...current, { role: "assistant", content: result.answer, citations: result.citations }]); } catch (error) { showNotice((error as Error).message, "bad"); } finally { setAsking(false); } };
-  return <aside className="assistant-pane"><div className="assistant-head"><div className="assistant-icon"><Bot size={19} /></div><div><strong>SomeOS Assistant</strong><span><i /> Local Gemma</span></div></div><div className="assistant-messages">{messages.map((message, index) => <div className={`message ${message.role}`} key={index}>{message.role === "assistant" && <MessageSquareText size={16} />}<div><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.citations?.length ? <div className="citations">{message.citations.map((citation) => <button key={citation.path} onClick={() => onOpen(citation.path)}>{citation.path}</button>)}</div> : null}</div></div>)}{asking && <div className="message assistant"><LoaderCircle className="spin" size={16} /><div><p>Reading your filesystem…</p></div></div>}</div><form className="assistant-input" onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Ask your private knowledge…" aria-label="Ask SomeOS" rows={3} /><button disabled={!question.trim() || asking} aria-label="Send question"><Send size={17} /></button><span>Answers stay on this machine</span></form></aside>;
+  return <aside id="someos-assistant" className="assistant-pane"><div className="assistant-head"><div className="assistant-icon"><Bot size={19} /></div><div><strong>SomeOS Assistant</strong><span><i /> Local Gemma</span></div><button className="icon-button assistant-close" onClick={onClose} aria-label="Close assistant pane" aria-controls="someos-assistant" aria-expanded="true" title="Close assistant pane"><PanelRightClose size={18} /></button></div><div className="assistant-messages">{messages.map((message, index) => <div className={`message ${message.role}`} key={index}>{message.role === "assistant" && <MessageSquareText size={16} />}<div><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.citations?.length ? <div className="citations">{message.citations.map((citation) => <button key={citation.path} onClick={() => onOpen(citation.path)}>{citation.path}</button>)}</div> : null}</div></div>)}{asking && <div className="message assistant"><LoaderCircle className="spin" size={16} /><div><p>Reading your filesystem…</p></div></div>}</div><form className="assistant-input" onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Ask your private knowledge…" aria-label="Ask SomeOS" rows={3} /><button disabled={!question.trim() || asking} aria-label="Send question"><Send size={17} /></button><span>Answers stay on this machine</span></form></aside>;
 }
